@@ -95,6 +95,10 @@ def query():
 
     #### Step 4.b.ii
     response = None   # TODO: Replace me with an appropriate call to OpenSearch
+    response = opensearch.search(
+        body=query_obj,
+        index="bbuy_products"  # Where do I get the index name from?
+    )
     # Postprocess results here if you so desire
 
     #print(response)
@@ -105,17 +109,87 @@ def query():
     else:
         redirect(url_for("index"))
 
-
 def create_query(user_query, filters, sort="_score", sortDir="desc"):
     print("Query: {} Filters: {} Sort: {}".format(user_query, filters, sort))
     query_obj = {
         'size': 10,
         "query": {
-            "match_all": {} # Replace me with a query that both searches and filters
+            "bool": {
+                "must": [
+                    {
+                        "query_string": {
+                            "query": user_query if user_query == "*" else f"\"{user_query}\"", 
+                            "fields": ["name^100", "shortDescription^50", "longDescription^10", "department"],
+                            "phrase_slop": 3
+                        }
+                    }
+                ],
+                "filter": filters if filters else []
+            }
         },
         "aggs": {
             #### Step 4.b.i: create the appropriate query and aggregations here
-
-        }
+            "regularPrice": {
+                "range": {
+                    "field": "regularPrice",
+                    "ranges": [
+                        {
+                            "key": "$ - 0-20",
+                            "to": 20
+                        },
+                        {
+                            "key": "$$ - 20-40",
+                            "from": 20,
+                            "to": 40
+                        },
+                        {
+                            "key": "$$$ - 40-60",
+                            "from": 40,
+                            "to": 60
+                        },
+                        {
+                            "key": "$$$$ - 60-80",
+                            "from": 60,
+                            "to": 80
+                        },
+                        {
+                            "key": "$$$$$ - 80-100",
+                            "from": 80,
+                            "to": 100
+                        },
+                        {
+                            "key": "$$$$$$ - 100+",
+                            "from": 100
+                        }
+                    ]
+                }
+            },
+            "department": {
+                "terms": {
+                    "field": "department.keyword",
+                }
+            },
+            "missing_images": {
+                "missing": {
+                    "field": "image.keyword"
+                }
+            }
+        },
+        "highlight": {
+            "fields": {
+                "name": {},
+                "shortDescription": {},
+                "longDescription": {}
+            },
+            "pre_tags": "<mark><b>",
+            "post_tags": "</b></mark>"
+        },
+        "sort": [
+            {
+                f"{sort}": {
+                    "order": sortDir
+                }
+            }
+        ]
     }
     return query_obj
