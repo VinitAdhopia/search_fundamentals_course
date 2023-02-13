@@ -86,7 +86,8 @@ def query():
         sortDir = request.args.get("sortDir", sortDir)
         if filters_input:
             (filters, display_filters, applied_filters) = process_filters(filters_input)
-
+        else:
+            filters  = []
         query_obj = create_query(user_query, filters, sort, sortDir)
     else:
         query_obj = create_query("*", [], sort, sortDir)
@@ -97,7 +98,7 @@ def query():
     response = None   # TODO: Replace me with an appropriate call to OpenSearch
     response = opensearch.search(
         body=query_obj,
-        index="bbuy_products"  # Where do I get the index name from?
+        index="bbuy_products"  # Where should I get the index name from?
     )
     # Postprocess results here if you so desire
 
@@ -114,17 +115,46 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
     query_obj = {
         'size': 10,
         "query": {
-            "bool": {
-                "must": [
+            "function_score": {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "query_string": {
+                                    "query": user_query if user_query == "*" else f"\"{user_query}\"",
+                                    "fields": ["name^1000", "shortDescription^50", "longDescription^10", "department"],
+                                    "phrase_slop": 3
+                                }
+                            }
+                        ],
+                        "filter": filters
+                    }
+                },
+                "boost_mode": "replace",
+                "score_mode": "avg",
+                "functions": [
                     {
-                        "query_string": {
-                            "query": user_query if user_query == "*" else f"\"{user_query}\"", 
-                            "fields": ["name^100", "shortDescription^50", "longDescription^10", "department"],
-                            "phrase_slop": 3
+                        "field_value_factor": {
+                            "field": "salesRankShortTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankMediumTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankLongTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
                         }
                     }
-                ],
-                "filter": filters if filters else []
+                ]
             }
         },
         "aggs": {
@@ -134,32 +164,32 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
                     "field": "regularPrice",
                     "ranges": [
                         {
-                            "key": "$ - 0-20",
-                            "to": 20
-                        },
-                        {
-                            "key": "$$ - 20-40",
-                            "from": 20,
-                            "to": 40
-                        },
-                        {
-                            "key": "$$$ - 40-60",
-                            "from": 40,
-                            "to": 60
-                        },
-                        {
-                            "key": "$$$$ - 60-80",
-                            "from": 60,
-                            "to": 80
-                        },
-                        {
-                            "key": "$$$$$ - 80-100",
-                            "from": 80,
+                            "key": "$ - 0-100",
                             "to": 100
                         },
                         {
-                            "key": "$$$$$$ - 100+",
-                            "from": 100
+                            "key": "$$ - 100-200",
+                            "from": 100,
+                            "to": 200
+                        },
+                        {
+                            "key": "$$$ - 200-300",
+                            "from": 200,
+                            "to": 300
+                        },
+                        {
+                            "key": "$$$$ - 300-400",
+                            "from": 300,
+                            "to": 400
+                        },
+                        {
+                            "key": "$$$$$ - 400-500",
+                            "from": 400,
+                            "to": 500
+                        },
+                        {
+                            "key": "$$$$$$ - 500+",
+                            "from": 500
                         }
                     ]
                 }
@@ -190,6 +220,18 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
                     "order": sortDir
                 }
             }
+        ],
+        "_source": [
+            "productId",
+            "name",
+            "shortDescription",
+            "longDescription",
+            "department",
+            "salesRankShortTerm",
+            "salesRankMediumTerm",
+            "salesRankLongTerm",
+            "regularPrice",
+            "image"
         ]
     }
     return query_obj
